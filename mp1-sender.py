@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import time
 import os
 import sys
 from glob import glob
@@ -7,6 +8,10 @@ import json
 import databento as db
 import psycopg as pg
 from questdb.ingress import Sender, TimestampNanos
+
+simulation_initialized = False
+simulation_first_event_ts = None
+simulation_base_ns = None
 
 
 def int_with_underscores(value):
@@ -72,6 +77,12 @@ def parse_arguments():
               "  'simulate': replay events preserving relative intervals,\n"
               "  or a literal UTC date (YYYY-MM-DD) to replace the date part.")
     )
+    parser.add_argument(
+        "--delay",
+        type=int,
+        default=0,
+        help="Delay between events in milliseconds (only valid for 'realtime' mode). Default is 0."
+    )
     return parser.parse_args()
 
 def ensure_table_exists(args):
@@ -103,6 +114,34 @@ def ensure_table_exists(args):
                 ts_recv TIMESTAMP,
                 venue_description VARCHAR
             ) timestamp(timestamp) PARTITION BY HOUR;
+            """
+            )
+
+def ensure_mat_views_exist(args):
+    conn_str = f'user={args.user} password={args.password} host={args.host} port={args.pg_port} dbname=qdb'
+
+    with pg.connect(conn_str, autocommit=True) as connection:
+        with connection.cursor() as cur:
+            cur.execute(
+            """
+            CREATE MATERIALIZED VIEW 'OHLC_30s'(
+                SELECT timestamp, symbol, first(price) as open, max(price) as high , min(price) as low,
+                       last(price) as close, sum(size) as volume
+                FROM top_of_book
+                WHERE size > 0
+                SAMPLE BY 30s
+            ) PARTITION BY DAY;
+            """
+            )
+
+            cur.execute(
+            """
+            CREATE MATERIALIZED VIEW 'OHLC_1h' WITH BASE 'OHLC_30s'  AS (
+                SELECT timestamp, symbol, first(open) as open, max(high) as high , min(low) as low,
+                       last(close) as close, sum(volume) as volume
+                FROM OHLC_30s
+                SAMPLE by 1h
+            ) PARTITION BY DAY;
             """
             )
 
@@ -169,7 +208,7 @@ def load_instruments_from_symbology(symbology, lookup):
             }
     return lookup
 
-def insert_into_questdb_from_file(mbp1_file, limit, sender, ts_mode):
+def insert_into_questdb_from_file(mbp1_file, limit, sender, ts_mode, delay_ms):
     global simulation_initialized, simulation_first_event_ts, simulation_base_ns
 
     # If ts_mode is a literal date (and not one of the keywords), try parsing it.
@@ -260,6 +299,10 @@ def insert_into_questdb_from_file(mbp1_file, limit, sender, ts_mode):
                 at=get_adjusted_timestamp(record.ts_event)
                 #at=TimestampNanos.now() #TimestampNanos(record.ts_event)
         )
+        # If in realtime mode and a delay is specified, pause before processing the next event.
+        if ts_mode == "realtime" and delay_ms > 0:
+            time.sleep(delay_ms / 1000.0)
+
 
 args = parse_arguments()
 
@@ -273,6 +316,7 @@ sender.establish()
 
 publishers = build_publisher_lookup(args.publisher_file, publishers)
 ensure_table_exists(args)
+# ensure_mat_views_exist(args)
 
 db.total = 0
 files = sorted(glob(args.file_pattern))
@@ -282,7 +326,6 @@ for file in files:
     print(f"Loading {file}...")
     store = db.DBNStore.from_file(file)
     load_instruments_from_symbology(store.symbology, instruments)
-    insert_into_questdb_from_file(store, args.limit, sender, args.timestamp_replace)
+    insert_into_questdb_from_file(store, args.limit, sender, args.timestamp_replace, args.delay)
 
 print(f"Total trades processed: {db.total:,}")
-
