@@ -124,7 +124,7 @@ def ensure_mat_views_exist(args):
         with connection.cursor() as cur:
             cur.execute(
             """
-            CREATE MATERIALIZED VIEW 'OHLC_30s'(
+            CREATE MATERIALIZED VIEW IF NOT EXISTS 'OHLC_30s' AS (
                 SELECT timestamp, symbol, first(price) as open, max(price) as high , min(price) as low,
                        last(price) as close, sum(size) as volume
                 FROM top_of_book
@@ -136,7 +136,7 @@ def ensure_mat_views_exist(args):
 
             cur.execute(
             """
-            CREATE MATERIALIZED VIEW 'OHLC_1h' WITH BASE 'OHLC_30s'  AS (
+            CREATE MATERIALIZED VIEW IF NOT EXISTS 'OHLC_1h'  AS (
                 SELECT timestamp, symbol, first(open) as open, max(high) as high , min(low) as low,
                        last(close) as close, sum(volume) as volume
                 FROM OHLC_30s
@@ -254,9 +254,9 @@ def insert_into_questdb_from_file(mbp1_file, limit, sender, ts_mode, delay_ms):
     for record in mbp1_file:
         db.total += 1
         if db.total % 1_000_000 == 0:
-            print(f"{db.total:_} records")
+            print(f"{db.total:_} records", flush=True)
         if db.total > limit:
-            print(f"Reached limit of {limit:_} records. Exiting.")
+            print(f"Reached limit of {limit:_} records. Exiting.", flush=True)
             sender.flush()
             sender.close()
             sys.exit()
@@ -309,21 +309,21 @@ args = parse_arguments()
 instruments = {}
 publishers = {}
 
-questdb_conf = f"{args.http_conn_host};token={args.http_token};tls_verify=unsafe_off;auto_flush_rows=150000;auto_flush_interval=1500;"
+questdb_conf = f"{args.http_conn_host};token={args.http_token};tls_verify=unsafe_off;auto_flush_rows=250000;auto_flush_interval=10000;"
 sender = Sender.from_conf(questdb_conf)
 sender.establish()
 
 
 publishers = build_publisher_lookup(args.publisher_file, publishers)
 ensure_table_exists(args)
-# ensure_mat_views_exist(args)
+ensure_mat_views_exist(args)
 
 db.total = 0
 files = sorted(glob(args.file_pattern))
 
 # Process each file
 for file in files:
-    print(f"Loading {file}...")
+    print(f"Loading {file}...", flush=True)
     store = db.DBNStore.from_file(file)
     load_instruments_from_symbology(store.symbology, instruments)
     insert_into_questdb_from_file(store, args.limit, sender, args.timestamp_replace, args.delay)
