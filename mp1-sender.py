@@ -328,4 +328,6 @@ for file in files:
     load_instruments_from_symbology(store.symbology, instruments)
     insert_into_questdb_from_file(store, args.limit, sender, args.timestamp_replace, args.delay)
 
+sender.flush()
+sender.close()
 print(f"Total trades processed: {db.total:,}")

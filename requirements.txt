@@ -2,3 +2,4 @@ questdb[dataframe]
 databento
 notebook
 psycopg[binary]
+pyarrow
