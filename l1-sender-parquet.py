@@ -104,7 +104,7 @@ def get_adjusted_timestamp(record_ns, ts_mode, literal_date):
     if ts_mode == "simulate":
         if not hasattr(get_adjusted_timestamp, 'first_ns'):
             get_adjusted_timestamp.first_ns = record_ns
-            get_adjusted_timestamp.base_ns = int(TimestampNanos.now().nanos)
+            get_adjusted_timestamp.base_ns =  int(str(TimestampNanos.now()).split('(')[1][:-1])
         offset = record_ns - get_adjusted_timestamp.first_ns
         return TimestampNanos(get_adjusted_timestamp.base_ns + offset)
     # literal date replacement
@@ -152,6 +152,7 @@ def process_chunk(chunk, config):
                 'bid_count','ask_count','ts_event','ts_recv','venue_description') }
             record_ns = int(cols['ts_event'].timestamp()*1e9)
             at = get_adjusted_timestamp(record_ns, ts_mode, literal_date)
+
             sender.row(f"top_of_book{suffix}", symbols=sy, columns=cols, at=at)
             if ts_mode == "realtime" and delay_ms>0:
                 time.sleep(delay_ms/1000.0)
