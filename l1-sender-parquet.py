@@ -91,9 +91,20 @@ def ensure_mat_views_exist(args):
         FROM OHLC_30s{args.table_suffix} SAMPLE BY 1h
     ) PARTITION BY DAY;
     """
+
+    mv3 = f"""
+    create materialized view if not exists prices_10s{args.table_suffix} AS (
+        select timestamp, symbol, side, avg(price) as price, avg(size) as size
+        from top_of_book{args.table_suffix}
+        WHERE side in ('A','B')
+        sample by 10s
+    ) PARTITION BY HOUR;
+    """
+
     with pg.connect(conn_str, autocommit=True) as conn:
         conn.execute(mv1)
         conn.execute(mv2)
+        conn.execute(mv3)
 
 
 def get_adjusted_timestamp(record_ns, ts_mode, literal_date):
