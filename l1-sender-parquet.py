@@ -113,18 +113,28 @@ def get_adjusted_timestamp(record_ns, ts_mode, literal_date):
     if ts_mode == "original":
         return TimestampNanos(record_ns)
     if ts_mode == "simulate":
+        now_ns = int(time.time() * 1e9)
+
         if not hasattr(get_adjusted_timestamp, 'first_ns'):
             get_adjusted_timestamp.first_ns = record_ns
-            get_adjusted_timestamp.base_ns =  int(str(TimestampNanos.now()).split('(')[1][:-1])
+            get_adjusted_timestamp.base_ns = now_ns
+            get_adjusted_timestamp.last_rebase_ns = now_ns
+
+        # Rebase every 10s to prevent drift
+        if now_ns - get_adjusted_timestamp.last_rebase_ns > 10_000_000_000:
+            get_adjusted_timestamp.base_ns = now_ns + 5_000_000_000
+            get_adjusted_timestamp.first_ns = record_ns
+            get_adjusted_timestamp.last_rebase_ns = now_ns
+
         offset = record_ns - get_adjusted_timestamp.first_ns
         return TimestampNanos(get_adjusted_timestamp.base_ns + offset)
+
     # literal date replacement
-    original_dt = datetime.fromtimestamp(record_ns/1e9, tz=timezone.utc)
+    original_dt = datetime.fromtimestamp(record_ns / 1e9, tz=timezone.utc)
     new_dt = original_dt.replace(year=literal_date.year,
                                  month=literal_date.month,
                                  day=literal_date.day)
-    return TimestampNanos(int(new_dt.timestamp()*1e9))
-
+    return TimestampNanos(int(new_dt.timestamp() * 1e9))
 
 def process_chunk(chunk, config):
     """Each process ingests its assigned (path, rg, max_rows, start_offset)."""
